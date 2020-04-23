@@ -9,6 +9,10 @@ import random
 
 from mxnet.image import ImageIter
 from mxnet.io import io
+from mxnet.io import DataIter
+from mxnet.image import CreateAugmenter
+import h5py
+from mxnet.image import imdecode
 
 from ..utils import normalize_img_array
 from .multiproc_data import MPData
@@ -359,3 +363,96 @@ class GrayImageIter(ImageIter):
             img = normalize_img_array(img, dtype='float32')
             new_data[i] = nd.expand_dims(nd.array(img), 0)  # res shape: [1, height, width]
         return new_data
+
+
+class Hdf5ImgIter(DataIter):
+    '''
+    A image data iter input from hdf5 dataset.
+    For simplity, all the images in hdf5 must have the data_shape same as in args.
+    '''
+    def __init__(self, batch_size, data_shape, dataset_fp, classes_dict,
+                 shuffle=False, aug_list=None, label_width=1, dtype='int32',
+                 mode='train', train_ratio=0.8, debug=False, **kwargs):
+        '''
+        :param dataset_fp: str
+            file path of the hdf5 file of the datset
+        :param mode: str
+            split of dataset: train or test
+        :param data_shep: tuple
+            (3, height, width) although the images stored in hdf5 are grayimage
+        :param classes_dict: dict
+            char token to label id
+        :param label_width: int
+            ensure the lengths of all the labels are <= label_width
+        :param dtype: str
+            dtype of label
+        '''
+        super(Hdf5ImgIter, self).__init__()
+        self.cursor = 0
+        self.dataset = h5py.File(dataset_fp, 'r')
+        self.batch_size = batch_size
+        self.data_shape = data_shape
+        self.classes_dict = classes_dict
+        self.label_width = label_width
+        self.dtype = dtype
+        if aug_list:
+            self.auglist = aug_list
+        else:
+            self.auglist = CreateAugmenter(data_shape, **kwargs)
+        assert 0 < train_ratio < 1
+        num_train = int(train_ratio * len(self.dataset))
+        self.num_data = num_train if mode == 'train' else (len(self.dataset) - num_train)
+        assert self.num_data > 0
+        assert self.batch_size > 0
+        self.offset = 0 if mode == 'train' else num_train
+        if debug:
+            self.num_data = 8000 if mode == 'train' else 2000
+            self.offset = 0 if mode == 'train' else 8000
+        self.num_batch = np.ceil(self.num_data / batch_size)
+        self.batch_indices = list(range(self.num_batch))
+        self.reset()
+
+    def reset(self):
+        random.shuffle(self.batch_indices)
+        self.cursor = 0
+
+    def iter_next(self):
+        self.cursor += 1
+        return self.cursor <= self.num_batch
+
+    def next(self):
+        if self.iter_next():
+            cur = self.batch_indices[self.cursor - 1]
+            # round pad
+            indices = [str(self.offset + (i % self.num_data)) for i in range(
+                self.batch_size * cur, self.batch_size * (cur + 1))]
+            imgs = []
+            lbls = []
+            for index in indices:
+                img = self.dataset[index]['img'][...]
+                img = np.array(Image.fromarray(img).convert('RGB'))
+                assert img.shape[0:2] == self.data_shape[1:3]
+                img = mx.nd.array(img)
+                for aug in self.auglist:
+                    img = aug(img)
+                if img.dtype != np.uint8:
+                    img = img.astype('uint8')
+                # color to gray
+                img = np.array(Image.fromarray(img.transpose(
+                    (1, 2, 0)).asnumpy()).convert('L'))
+                img = normalize_img_array(img, dtype='float32')
+                # res shape: [1, height, width]
+                img = nd.expand_dims(nd.array(img), 0)
+                imgs.append(img)
+                lbl = [self.classes_dict[c] for c in str(self.dataset[index]['y'][...])]
+                # 0 is blank token in CTC loss
+                lbl = lbl + [0,] * (self.label_width - len(lbl))
+                lbls.append(mx.nd.array(lbl, dtype=self.dtype))
+            return io.DataBatch(data=imgs, label=lbls, pad=self.getpad())
+        else:
+            StopIteration
+
+    def getpad(self):
+        '''getpad executed after iter_next'''
+        if self.cursor == self.num_batch and self.num_data % self.batch_size:
+            return self.batch_size - self.num_data % self.batch_size

@@ -27,16 +27,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cnocr.__version__ import __version__
 from cnocr.consts import EMB_MODEL_TYPES, SEQ_MODEL_TYPES
-from cnocr.utils import data_dir, set_logger
+from cnocr.utils import data_dir, read_charset
 from cnocr.hyperparams.cn_hyperparams import CnHyperparams
 from cnocr.data_utils.data_iter import GrayImageIter
 from cnocr.data_utils.aug import FgBgFlipAug
 from cnocr.symbols.crnn import gen_network
 from cnocr.fit.ctc_metrics import CtcMetrics
 from cnocr.fit.fit import fit
-
-
-logger = set_logger(log_level=logging.INFO)
 
 
 def parse_args():
@@ -68,6 +65,23 @@ def parse_args():
         help="Path to test txt file",
         type=str,
         default='data/sample-data-lst/test.txt',
+    )
+    parser.add_argument(
+        '--dataset',
+        help='file path for dataset hdf5',
+        type=str,
+        required=True
+    )
+    parser.add_argument(
+        '--chraset',
+        help='file path for chat set of labels',
+        type=str,
+        required=True
+    )
+    parser.add_argument(
+        '--debug',
+        help='debug mode',
+        action='store_true',
     )
     parser.add_argument(
         "--use_train_image_aug",
@@ -117,7 +131,7 @@ def train_cnocr(args):
     logging.basicConfig(level=logging.DEBUG, format=head)
     args.model_name = args.emb_model_type + '-' + args.seq_model_type
     out_dir = os.path.join(args.out_model_dir, args.model_name)
-    logger.info('save models to dir: %s' % out_dir)
+    print('save models to dir: %s' % out_dir, flush=True)
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     args.prefix = os.path.join(
@@ -131,7 +145,8 @@ def train_cnocr(args):
     metrics = CtcMetrics(hp.seq_length)
 
     data_train, data_val = _gen_iters(
-        hp, args.train_file, args.test_file, args.use_train_image_aug
+        hp, args.train_file, args.test_file, args.use_train_image_aug.
+        args.dataset, args.charset, args.debug
     )
     data_names = ['data']
     fit(
@@ -155,7 +170,8 @@ def _update_hp(hp, args):
     return hp
 
 
-def _gen_iters(hp, train_fp_prefix, val_fp_prefix, use_train_image_aug):
+def _gen_iters(hp, train_fp_prefix, val_fp_prefix, use_train_image_aug,
+               dataset_fp, charset_fp, debug=False):
     height, width = hp.img_height, hp.img_width
     augs = None
     if use_train_image_aug:
@@ -175,24 +191,47 @@ def _gen_iters(hp, train_fp_prefix, val_fp_prefix, use_train_image_aug):
             inter_method=2,
         )
         augs.append(FgBgFlipAug(p=0.2))
+    # train_iter = GrayImageIter(
+    #     batch_size=hp.batch_size,
+    #     data_shape=(3, height, width),
+    #     label_width=hp.num_label,
+    #     dtype='int32',
+    #     shuffle=True,
+    #     path_imgrec=str(train_fp_prefix) + ".rec",
+    #     path_imgidx=str(train_fp_prefix) + ".idx",
+    #     aug_list=augs,
+    # )
+    #
+    # val_iter = GrayImageIter(
+    #     batch_size=hp.batch_size,
+    #     data_shape=(3, height, width),
+    #     label_width=hp.num_label,
+    #     dtype='int32',
+    #     path_imgrec=str(val_fp_prefix) + ".rec",
+    #     path_imgidx=str(val_fp_prefix) + ".idx",
+    # )
+    _, token2id = read_charset(charset_fp)
+    assert all([len(c) == 1 for c in token2id.keys()])
     train_iter = GrayImageIter(
         batch_size=hp.batch_size,
         data_shape=(3, height, width),
+        dataset_fp=dataset_fp,
         label_width=hp.num_label,
+        classes_dict=token2id,
         dtype='int32',
         shuffle=True,
-        path_imgrec=str(train_fp_prefix) + ".rec",
-        path_imgidx=str(train_fp_prefix) + ".idx",
         aug_list=augs,
+        debug=debug
     )
 
     val_iter = GrayImageIter(
         batch_size=hp.batch_size,
         data_shape=(3, height, width),
+        dataset_fp=dataset_fp,
+        classes_dict=token2id,
         label_width=hp.num_label,
         dtype='int32',
-        path_imgrec=str(val_fp_prefix) + ".rec",
-        path_imgidx=str(val_fp_prefix) + ".idx",
+        debug=debug
     )
 
     return train_iter, val_iter

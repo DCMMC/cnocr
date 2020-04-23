@@ -20,7 +20,9 @@ class CnHyperparams(object):
 
         self._batch_size = 128
         self._num_classes = 6426  # 应该是6426的。。 5990
-        self._img_width = 280
+        # self._img_width = 280
+        # 20 chinese chars with 560 width
+        self._img_width = 560
         self._img_height = 32
 
         # LSTM hyper parameters

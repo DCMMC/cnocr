@@ -408,7 +408,7 @@ class Hdf5ImgIter(DataIter):
         if debug:
             self.num_data = 8000 if mode == 'train' else 2000
             self.offset = 0 if mode == 'train' else 8000
-        self.num_batch = np.ceil(self.num_data / batch_size)
+        self.num_batch = int(np.ceil(self.num_data / batch_size))
         self.batch_indices = list(range(self.num_batch))
         self.reset()
 

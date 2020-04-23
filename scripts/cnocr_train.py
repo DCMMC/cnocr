@@ -30,6 +30,7 @@ from cnocr.consts import EMB_MODEL_TYPES, SEQ_MODEL_TYPES
 from cnocr.utils import data_dir, read_charset
 from cnocr.hyperparams.cn_hyperparams import CnHyperparams
 from cnocr.data_utils.data_iter import GrayImageIter
+from cnocr.data_utils.data_iter import Hdf5ImgIter
 from cnocr.data_utils.aug import FgBgFlipAug
 from cnocr.symbols.crnn import gen_network
 from cnocr.fit.ctc_metrics import CtcMetrics
@@ -73,7 +74,7 @@ def parse_args():
         required=True
     )
     parser.add_argument(
-        '--chraset',
+        '--charset',
         help='file path for chat set of labels',
         type=str,
         required=True
@@ -145,7 +146,7 @@ def train_cnocr(args):
     metrics = CtcMetrics(hp.seq_length)
 
     data_train, data_val = _gen_iters(
-        hp, args.train_file, args.test_file, args.use_train_image_aug.
+        hp, args.train_file, args.test_file, args.use_train_image_aug,
         args.dataset, args.charset, args.debug
     )
     data_names = ['data']
@@ -211,8 +212,8 @@ def _gen_iters(hp, train_fp_prefix, val_fp_prefix, use_train_image_aug,
     #     path_imgidx=str(val_fp_prefix) + ".idx",
     # )
     _, token2id = read_charset(charset_fp)
-    assert all([len(c) == 1 for c in token2id.keys()])
-    train_iter = GrayImageIter(
+    assert all([len(c) == 1 for c in token2id.keys() if c])
+    train_iter = Hdf5ImgIter(
         batch_size=hp.batch_size,
         data_shape=(3, height, width),
         dataset_fp=dataset_fp,
@@ -224,7 +225,7 @@ def _gen_iters(hp, train_fp_prefix, val_fp_prefix, use_train_image_aug,
         debug=debug
     )
 
-    val_iter = GrayImageIter(
+    val_iter = Hdf5ImgIter(
         batch_size=hp.batch_size,
         data_shape=(3, height, width),
         dataset_fp=dataset_fp,

@@ -6,17 +6,18 @@ import numpy as np
 from mxnet import nd
 import mxnet as mx
 import random
+import logging
 
 from mxnet.image import ImageIter
 from mxnet.io import io
 from mxnet.io import DataIter
 from mxnet.image import CreateAugmenter
 import h5py
-from mxnet.image import imdecode
 
-from ..utils import normalize_img_array
+from ..utils import normalize_img_array, set_logger
 from .multiproc_data import MPData
 
+logger = set_logger(log_level=logging.INFO)
 
 class SimpleBatch(object):
     def __init__(self, data_names, data, label_names=list(), label=list()):
@@ -335,6 +336,8 @@ class GrayImageIter(ImageIter):
         data_batch = super().next()
         new_data = [self._post_process(sub_data) for sub_data in data_batch.data]
 
+        # print(f'#new_data: {len(new_data)}, shape: {new_data[0].shape}, dtype: {new_data[0].dtype}')
+        # print(f'#label: {len(data_batch.label)}, label: {data_batch.label[0].shape}, dtype={data_batch.label[0].dtype}, lael: {data_batch.label[0].asnumpy()[0][:4]}')
         # data_names = ['data']
         # label_names = ['label']
         # return SimpleBatch(data_names, [new_data], label_names, data_batch.label)
@@ -370,8 +373,9 @@ class Hdf5ImgIter(DataIter):
     A image data iter input from hdf5 dataset.
     For simplity, all the images in hdf5 must have the data_shape same as in args.
     '''
+
     def __init__(self, batch_size, data_shape, dataset_fp, classes_dict,
-                 shuffle=False, aug_list=None, label_width=1, dtype='int32',
+                 shuffle=False, aug_list=None, label_width=1, dtype='float32',
                  mode='train', train_ratio=0.8, debug=False, **kwargs):
         '''
         :param dataset_fp: str
@@ -385,7 +389,7 @@ class Hdf5ImgIter(DataIter):
         :param label_width: int
             ensure the lengths of all the labels are <= label_width
         :param dtype: str
-            dtype of label
+            dtype of label. Note that I found dtype must be float32 instead of int32
         '''
         super(Hdf5ImgIter, self).__init__()
         self.cursor = 0
@@ -403,16 +407,21 @@ class Hdf5ImgIter(DataIter):
             self.auglist = CreateAugmenter(data_shape, **kwargs)
         assert 0 < train_ratio < 1
         num_train = int(train_ratio * len(self.dataset))
-        self.num_data = num_train if mode == 'train' else (len(self.dataset) - num_train)
+        self.num_data = num_train if mode == 'train' else \
+            (len(self.dataset) - num_train)
         assert self.num_data > 0
         assert self.batch_size > 0
         self.offset = 0 if mode == 'train' else num_train
         if debug:
             self.num_data = 8000 if mode == 'train' else 2000
             self.offset = 0 if mode == 'train' else 8000
-        self.num_batch = np.ceil(self.num_data / batch_size)
+        self.num_batch = int(np.ceil(self.num_data / batch_size))
         self.batch_indices = list(range(self.num_batch))
         self.reset()
+        logger.info(('DataIter initialized, mode={}, batch_size={}, ' +
+                     'num_batch={}, num_data={}').format(
+                         mode, batch_size, self.num_batch, self.num_data
+                     ))
 
     def reset(self):
         random.shuffle(self.batch_indices)
@@ -440,21 +449,27 @@ class Hdf5ImgIter(DataIter):
                 if img.dtype != np.uint8:
                     img = img.astype('uint8')
                 # color to gray
-                img = np.array(Image.fromarray(img.transpose(
-                    (1, 2, 0)).asnumpy()).convert('L'))
+                img = np.array(Image.fromarray(
+                    img.asnumpy()).convert('L'))
                 img = normalize_img_array(img, dtype='float32')
                 # res shape: [1, height, width]
                 img = nd.expand_dims(nd.array(img), 0)
                 imgs.append(img)
-                lbl = [self.classes_dict[c] for c in str(self.dataset[index]['y'][...])]
+                lbl = [self.classes_dict[c] for c in str(
+                    self.dataset[index]['y'][...])]
                 # 0 is blank token in CTC loss
-                lbl = lbl + [0,] * (self.label_width - len(lbl))
+                lbl = lbl + [0, ] * (self.label_width - len(lbl))
                 lbls.append(mx.nd.array(lbl, dtype=self.dtype))
-            return io.DataBatch(data=imgs, label=lbls, pad=self.getpad())
+            imgs = mx.ndarray.stack(*imgs, axis=0).astype('float32')
+            lbls = mx.ndarray.stack(*lbls, axis=0).astype(self.dtype)
+            # logger.info(f'batch: {self.cursor}, imgs: {imgs.shape}, lbls: {lbls.shape}')
+            return io.DataBatch(data=[imgs, ], label=[lbls, ],
+                                pad=self.getpad())
         else:
-            StopIteration
+            raise StopIteration()
 
     def getpad(self):
         '''getpad executed after iter_next'''
-        if self.cursor == self.num_batch and self.num_data % self.batch_size:
+        cur = self.batch_indices[self.cursor - 1]
+        if cur + 1 == self.num_batch and self.num_data % self.batch_size:
             return self.batch_size - self.num_data % self.batch_size

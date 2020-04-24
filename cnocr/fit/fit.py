@@ -24,6 +24,12 @@ def fit(network, data_train, data_val, metrics, args, hp, data_names=None):
 
     sym, arg_params, aux_params = _load_model(args)
     if sym is not None:
+        # debug by DCMMC
+        if sym.tojson() != network.tojson():
+            with open('debug_sym.json', 'w') as f:
+                f.write(sym.tojson())
+            with open('debug_network.json', 'w') as f:
+                f.write(network.tojson())
         assert sym.tojson() == network.tojson()
     if not os.path.exists(os.path.dirname(args.prefix)):
         os.makedirs(os.path.dirname(args.prefix))

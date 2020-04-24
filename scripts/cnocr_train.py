@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cnocr.__version__ import __version__
 from cnocr.consts import EMB_MODEL_TYPES, SEQ_MODEL_TYPES
-from cnocr.utils import data_dir, read_charset
+from cnocr.utils import data_dir, read_charset, set_logger
 from cnocr.hyperparams.cn_hyperparams import CnHyperparams
 from cnocr.data_utils.data_iter import GrayImageIter
 from cnocr.data_utils.data_iter import Hdf5ImgIter
@@ -36,6 +36,7 @@ from cnocr.symbols.crnn import gen_network
 from cnocr.fit.ctc_metrics import CtcMetrics
 from cnocr.fit.fit import fit
 
+logger = set_logger(log_level=logging.INFO)
 
 def parse_args():
     # Parse command line arguments
@@ -132,7 +133,7 @@ def train_cnocr(args):
     logging.basicConfig(level=logging.DEBUG, format=head)
     args.model_name = args.emb_model_type + '-' + args.seq_model_type
     out_dir = os.path.join(args.out_model_dir, args.model_name)
-    print('save models to dir: %s' % out_dir, flush=True)
+    logger.info('save models to dir: %s' % out_dir)
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     args.prefix = os.path.join(
@@ -196,18 +197,17 @@ def _gen_iters(hp, train_fp_prefix, val_fp_prefix, use_train_image_aug,
     #     batch_size=hp.batch_size,
     #     data_shape=(3, height, width),
     #     label_width=hp.num_label,
-    #     dtype='int32',
+    #     dtype='float32',
     #     shuffle=True,
     #     path_imgrec=str(train_fp_prefix) + ".rec",
     #     path_imgidx=str(train_fp_prefix) + ".idx",
     #     aug_list=augs,
     # )
-    #
     # val_iter = GrayImageIter(
     #     batch_size=hp.batch_size,
     #     data_shape=(3, height, width),
     #     label_width=hp.num_label,
-    #     dtype='int32',
+    #     dtype='float32',
     #     path_imgrec=str(val_fp_prefix) + ".rec",
     #     path_imgidx=str(val_fp_prefix) + ".idx",
     # )
@@ -219,19 +219,20 @@ def _gen_iters(hp, train_fp_prefix, val_fp_prefix, use_train_image_aug,
         dataset_fp=dataset_fp,
         label_width=hp.num_label,
         classes_dict=token2id,
-        dtype='int32',
+        mode='train',
+        dtype='float32',
         shuffle=True,
         aug_list=augs,
         debug=debug
     )
-
     val_iter = Hdf5ImgIter(
         batch_size=hp.batch_size,
         data_shape=(3, height, width),
         dataset_fp=dataset_fp,
         classes_dict=token2id,
+        mode='val',
         label_width=hp.num_label,
-        dtype='int32',
+        dtype='float32',
         debug=debug
     )
 

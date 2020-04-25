@@ -136,3 +136,6 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+dev_no_bpe*
+train_no_bpe*

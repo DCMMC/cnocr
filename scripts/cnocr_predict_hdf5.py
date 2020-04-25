@@ -80,8 +80,9 @@ def main():
         res = [''.join(r) for r in res]
         res_train += res
         if idx_batch % log_cp == 0:
-            logger.info(f'batch [{idx_batch + 1}/{num_train_batch}]: ',
-                        f'{(time() - s_t)/(idx_batch + 1)}s/batch')
+            log_str = f'batch [{idx_batch + 1}/{num_train_batch}]: '
+            log_str += '{:.2f}s/batch'.format((time() - s_t)/(idx_batch + 1))
+            logger.info(log_str)
     logger.info('start val dataset')
     s_t = time()
     for idx_batch in range(num_val_batch):
@@ -95,8 +96,9 @@ def main():
         res = [''.join(r) for r in res]
         res_val += res
         if idx_batch % log_cp == 0:
-            logger.info(f'batch [{idx_batch + 1}/{num_train_batch}]: ',
-                        f'{(time() - s_t)/(idx_batch + 1)}s/batch')
+            log_str = f'batch [{idx_batch + 1}/{num_train_batch}]: '
+            log_str += '{:.2f}s/batch'.format((time() - s_t)/(idx_batch + 1))
+            logger.info(log_str)
     assert len(res_val) == len(gold_val)
     assert len(res_train) == len(gold_train)
     acc_train = sum([r == p for r, p in zip(res_train, gold_train)]) / len(res_train)

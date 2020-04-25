@@ -82,7 +82,8 @@ def lstm_init_states(batch_size, hp):
     return init_names, init_arrays
 
 
-def load_module(prefix, epoch, data_names, data_shapes, network=None):
+def load_module(prefix, epoch, data_names, data_shapes, network=None,
+                context=None):
     """
     Loads the model from checkpoint specified by prefix and epoch, binds it
     to an executor, and sets its parameters and returns a mx.mod.Module
@@ -91,13 +92,15 @@ def load_module(prefix, epoch, data_names, data_shapes, network=None):
     if network is not None:
         sym = network
 
+    # DCMMC: context of gpu
+    context = mx.cpu() if not context else context
     # We don't need CTC loss for prediction, just a simple softmax will suffice.
     # We get the output of the layer just before the loss layer ('pred_fc') and add softmax on top
     pred_fc = sym.get_internals()['pred_fc_output']
     sym = mx.sym.softmax(data=pred_fc)
 
     mod = mx.mod.Module(
-        symbol=sym, context=mx.cpu(), data_names=data_names, label_names=None
+        symbol=sym, context=context, data_names=data_names, label_names=None
     )
     mod.bind(for_training=False, data_shapes=data_shapes)
     mod.set_params(arg_params, aux_params, allow_missing=False)
@@ -113,6 +116,7 @@ class CnOcr(object):
         model_epoch=None,
         cand_alphabet=None,
         root=data_dir(),
+        gpus=0
     ):
         """
 
@@ -143,6 +147,11 @@ class CnOcr(object):
         self._hp = Hyperparams()
         self._hp._loss_type = None  # infer mode
 
+        # DCMMC: gpu context for mxnet
+        if gpus > 0:
+            self.context = [mx.context.gpu(i) for i in range(gpus)]
+        else:
+            self.context = [mx.context.cpu()]
         self._mod = self._get_module()
 
     def _assert_and_prepare_model_files(self):
@@ -172,7 +181,8 @@ class CnOcr(object):
         data_shapes = [(data_names[0], (hp.batch_size, 1, hp.img_height, hp.img_width))]
         logger.info('loading model parameters from dir %s' % self._model_dir)
         mod = load_module(
-            prefix, self._model_epoch, data_names, data_shapes, network=network
+            prefix, self._model_epoch, data_names, data_shapes, network=network,
+            context=self.context
         )
         return mod
 
@@ -310,11 +320,14 @@ class CnOcr(object):
         :param max_img_width:
         :return:
         """
+        # DCMMC: Greedy decoder for CTC
         class_ids = np.argmax(line_prob, axis=-1)
 
         if img_width < max_img_width:
             comp_ratio = self._hp.seq_len_cmpr_ratio
             end_idx = img_width // comp_ratio
+            # DCMMC: 原来照片是 right padding 的...
+            # 而我的数据集是 left and right padding
             if end_idx < len(class_ids):
                 class_ids[end_idx:] = 0
         prediction, start_end_idx = CtcMetrics.ctc_label(class_ids.tolist())
